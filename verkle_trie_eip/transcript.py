@@ -71,32 +71,3 @@ class Transcript():
     # - Separate sub-protocols
     def domain_sep(self, label):
         self.state.update(label)
-
-
-if __name__ == "__main__":
-    MODULUS = 7
-    point = Point(False)
-    reduced_scalar = randint(0, MODULUS)
-    scalar = reduced_scalar + MODULUS
-
-    # Prover's View
-    prover_transcript = Transcript(MODULUS, b"protocol_name")
-
-    prover_transcript.append_point(point, b"D")
-    prover_transcript.domain_sep(b"sub_protocol_name")
-    prover_transcript.append_scalar(reduced_scalar, b"r")
-
-    # Prover challenge
-    prover_q = prover_transcript.challenge_scalar(b"q")
-
-    # Verifier's View
-    verifier_transcript = Transcript(MODULUS, b"protocol_name")
-
-    verifier_transcript.append_point(point, b"D")
-    verifier_transcript.domain_sep(b"sub_protocol_name")
-    verifier_transcript.append_scalar(scalar, b"r")
-
-    # Verifier challenge
-    verifier_q = verifier_transcript.challenge_scalar(b"q")
-
-    assert prover_q == verifier_q
