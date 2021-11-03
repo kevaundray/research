@@ -41,7 +41,7 @@ class TestTranscript(unittest.TestCase):
 
         assert prover_q == verifier_q
 
-    def test_challenge_twice(self):
+    def test_vector_0(self):
         """
             Test that squeezing out a challenge twice
             will produce different challenges. ie it is 
@@ -54,10 +54,60 @@ class TestTranscript(unittest.TestCase):
         self.assertNotEqual(first_challenge, second_challenge)
 
     def test_vector_1(self):
+        """
+            Test that challenge creation is consistent across implementations
+        """
         transcript = Transcript(MODULUS, b"simple_protocol")
         challenge = transcript.challenge_scalar(b"simple_challenge")
 
         self.assertEqual("c2aa02607cbdf5595f00ee0dd94a2bbff0bed6a2bf8452ada9011eadb538d003",
+                         challenge.to_bytes(32, "little").hex())
+
+    def test_vector_2(self):
+        """
+            Test that append scalar is consistent across implementations
+        """
+        transcript = Transcript(MODULUS, b"simple_protocol")
+        scalar = 5 + MODULUS
+        reduced_scalar = 5
+        transcript.append_scalar(scalar, b"five")
+        transcript.append_scalar(reduced_scalar, b"five again")
+
+        challenge = transcript.challenge_scalar(b"simple_challenge")
+
+        self.assertEqual("498732b694a8ae1622d4a9347535be589e4aee6999ffc0181d13fe9e4d037b0b",
+                         challenge.to_bytes(32, "little").hex())
+
+    def test_vector_3(self):
+        """
+            Test that domain separation is consistent across implementations
+        """
+        transcript = Transcript(MODULUS, b"simple_protocol")
+        minus_one = MODULUS - 1
+        one = 1
+        transcript.append_scalar(minus_one, b"-1")
+        transcript.domain_sep(b"separate me")
+        transcript.append_scalar(minus_one, b"-1 again")
+        transcript.domain_sep(b"separate me again")
+        transcript.append_scalar(one, b"now 1")
+
+        challenge = transcript.challenge_scalar(b"simple_challenge")
+
+        self.assertEqual("14f59938e9e9b1389e74311a464f45d3d88d8ac96adf1c1129ac466de088d618",
+                         challenge.to_bytes(32, "little").hex())
+
+    def test_vector_4(self):
+        """
+            Test that appending points is consistent across implementations
+        """
+        transcript = Transcript(MODULUS, b"simple_protocol")
+
+        generator = Point(True)
+
+        transcript.append_point(generator, b"generator")
+        challenge = transcript.challenge_scalar(b"simple_challenge")
+
+        self.assertEqual("c3d390ff8ef3242c4ec3508d9c5f66d8c9f6aae3bde9ce7b4e1a53b9a6e9ac18",
                          challenge.to_bytes(32, "little").hex())
 
 
