@@ -2,7 +2,7 @@ from bandersnatch import Point, Scalar
 from poly_utils import PrimeField
 import hashlib
 import time
-
+from transcript import Transcript
 #
 # Utilities for dealing with polynomials in evaluation form
 #
@@ -14,6 +14,7 @@ import time
 # efficient.
 #
 #
+
 
 def hash(x):
     if isinstance(x, bytes):
@@ -30,6 +31,7 @@ def hash(x):
             b += a.serialize()
     return hash(b)
 
+
 class IPAUtils():
     """
     Class that defines helper functions for IPA proofs in evaluation form (Lagrange basis)
@@ -43,17 +45,14 @@ class IPAUtils():
         self.DOMAIN = primefield.DOMAIN
         self.primefield = primefield
 
-
     def hash_to_field(self, x):
         return int.from_bytes(hash(x), "little") % self.MODULUS
-
 
     def pedersen_commit(self, a):
         """
         Returns a Pedersen commitment to the vector a (defined by its coefficients)
         """
         return Point().msm(self.BASIS_G, [Scalar().from_int(x) for x in a])
-
 
     def pedersen_commit_sparse(self, values):
         """
@@ -71,14 +70,12 @@ class IPAUtils():
                 return r
         return Point().msm([self.BASIS_G[i] for i in values.keys()], [Scalar().from_int(x) for x in values.values()])
 
-
     def pedersen_commit_basis(self, a, basis):
         """
         Returns a Pedersen commitment to the vector a (defined by its coefficients)
         """
         return Point().msm(basis, [Scalar().from_int(x) for x in a])
 
-    
     def f_g_coefs(self, xinv_vec):
         f_g_coefs = []
 
@@ -92,17 +89,20 @@ class IPAUtils():
 
         return f_g_coefs
 
-
-    def check_ipa_proof(self, C, z, y, proof):
+    def check_ipa_proof(self, tr, C, z, y, proof):
         """
         Check the IPA proof for a commitment to a Polynomial in evaluation form
         """
+        tr.domain_sep(b"ipa")
         n = len(self.DOMAIN)
         m = n // 2
 
         b = self.primefield.barycentric_formula_constants(z)
+        tr.append_point(C, b"C")
+        tr.append_scalar(z, b"z")
+        tr.append_scalar(y, b"y")
+        w = tr.challenge_scalar(b"w")
 
-        w = self.hash_to_field([C, z, y])
         q = self.BASIS_Q.dup().glv(w)
 
         current_commitment = C.dup().add(q.dup().glv(y))
@@ -115,12 +115,16 @@ class IPAUtils():
         while n > 1:
             C_L, C_R = [Point().deserialize(C) for C in proof[i]]
 
-            x = self.hash_to_field([C_L, C_R])
+            tr.append_point(C_L, b"L")
+            tr.append_point(C_R, b"R")
+            x = tr.challenge_scalar(b"x")
+
             xinv = self.primefield.inv(x)
             xs.append(x)
             xinvs.append(xinv)
 
-            current_commitment = current_commitment.dup().add(C_L.dup().glv(x)).add(C_R.dup().glv(xinv))
+            current_commitment = current_commitment.dup().add(
+                C_L.dup().glv(x)).add(C_R.dup().glv(xinv))
 
             n = m
             m = n // 2
@@ -139,16 +143,15 @@ class IPAUtils():
 
         return current_commitment == computed_commitment
 
-
     def inner_product(self, a, b):
         return sum(x * y % self.MODULUS for x, y in zip(a, b)) % self.MODULUS
 
-
-    def evaluate_and_compute_ipa_proof(self, C, f_eval, z):
+    def evaluate_and_compute_ipa_proof(self, tr, C, f_eval, z):
         """
         Evaluates a function f (given in evaluation form) at a point z (which can be in the DOMAIN or not)
         and gives y = f(z) as well as an IPA proof that this is the correct result
         """
+        tr.domain_sep(b"ipa")
 
         assert len(f_eval) == len(self.DOMAIN)
 
@@ -161,7 +164,11 @@ class IPAUtils():
 
         proof = []
 
-        w = self.hash_to_field([C, z, y])
+        tr.append_point(C, b"C")
+        tr.append_scalar(z, b"z")
+        tr.append_scalar(y, b"y")
+        w = tr.challenge_scalar(b"w")
+
         q = self.BASIS_Q.dup().glv(w)
 
         current_basis = self.BASIS_G
@@ -175,19 +182,25 @@ class IPAUtils():
             b_R = b[m:]
             z_L = self.inner_product(a_R, b_L)
             z_R = self.inner_product(a_L, b_R)
-            C_L = self.pedersen_commit_basis(a_R, current_basis[:m]).add(q.dup().glv(z_L))
-            C_R = self.pedersen_commit_basis(a_L, current_basis[m:]).add(q.dup().glv(z_R))
+            C_L = self.pedersen_commit_basis(
+                a_R, current_basis[:m]).add(q.dup().glv(z_L))
+            C_R = self.pedersen_commit_basis(
+                a_L, current_basis[m:]).add(q.dup().glv(z_R))
 
             proof.append([C_L.serialize(), C_R.serialize()])
 
-            x = self.hash_to_field([C_L, C_R])
+            tr.append_point(C_L, b"L")
+            tr.append_point(C_R, b"R")
+            x = tr.challenge_scalar(b"x")
+
             xinv = self.primefield.inv(x)
 
             # Compute updates for next round
             a = [(v + x * w) % self.MODULUS for v, w in zip(a_L, a_R)]
             b = [(v + xinv * w) % self.MODULUS for v, w in zip(b_L, b_R)]
 
-            current_basis = [v.dup().add(w.dup().glv(xinv)) for v, w in zip(current_basis[:m], current_basis[m:])]
+            current_basis = [v.dup().add(w.dup().glv(xinv))
+                             for v, w in zip(current_basis[:m], current_basis[m:])]
             n = m
             m = n // 2
 
@@ -195,6 +208,7 @@ class IPAUtils():
         proof.append([a[0]])
 
         return y, proof
+
 
 if __name__ == "__main__":
     MODULUS = 13108968793781547619861935127046491459309155893440570251786403306729687672801
@@ -222,16 +236,21 @@ if __name__ == "__main__":
     C = ipautils.pedersen_commit(poly_eval)
     time_b = time.time()
 
-    print("Pedersen commitment computed in {:.2f} ms".format((time_b - time_a)*1000))
+    print("Pedersen commitment computed in {:.2f} ms".format(
+        (time_b - time_a)*1000))
 
     time_a = time.time()
-    y, proof = ipautils.evaluate_and_compute_ipa_proof(C, poly_eval, 17)
+    prover_transcript = Transcript(MODULUS, b"test")
+    y, proof = ipautils.evaluate_and_compute_ipa_proof(
+        prover_transcript, C, poly_eval, 17)
     time_b = time.time()
 
-    print("Evaluation and proof computed in {:.2f} ms".format((time_b - time_a)*1000))
+    print("Evaluation and proof computed in {:.2f} ms".format(
+        (time_b - time_a)*1000))
 
     time_a = time.time()
-    assert ipautils.check_ipa_proof(C, 17, y, proof)
+    verifier_transcript = Transcript(MODULUS, b"test")
+    assert ipautils.check_ipa_proof(verifier_transcript, C, 17, y, proof)
     time_b = time.time()
 
     print("Proof verified in {:.2f} ms".format((time_b - time_a)*1000))

@@ -5,7 +5,7 @@ from poly_utils import PrimeField
 from time import time
 from ipa_utils import IPAUtils, hash
 import sys
-
+from transcript import Transcript
 #
 # Proof of concept implementation for verkle tries
 #
@@ -16,11 +16,11 @@ import sys
 # https://notes.ethereum.org/@vbuterin/verkle_tree_eip
 #
 
-# Bandersnatch curve modulus
+# Prime subgroup of the bandersnatch curve's group order
 MODULUS = 13108968793781547619861935127046491459309155893440570251786403306729687672801
 
 # Verkle trie parameters
-KEY_LENGTH = 256 # bits
+KEY_LENGTH = 256  # bits
 WIDTH_BITS = 8
 WIDTH = 2**WIDTH_BITS
 
@@ -59,7 +59,9 @@ VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C2 = 3
 
 VERKLE_PROOF_EXTENSION_PRESENT_NOEXTENSION = 0
 VERKLE_PROOF_EXTENSION_PRESENT_PRESENT = 1
-VERKLE_PROOF_EXTENSION_PRESENT_OTHERSTEM = 2 # Used to indicate that there is an extension present, but for a different stem
+# Used to indicate that there is an extension present, but for a different stem
+VERKLE_PROOF_EXTENSION_PRESENT_OTHERSTEM = 2
+
 
 def generate_basis(size):
     """
@@ -120,7 +122,8 @@ def update_verkle_tree_nocommitmentupdate(root_node, key, value):
         if index in current_node:
             current_node = current_node[index]
         else:
-            current_node[index] = {"node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE, "stem": stem, suffix: value}
+            current_node[index] = {
+                "node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE, "stem": stem, suffix: value}
             return
 
     if current_node["stem"] == stem:
@@ -132,7 +135,7 @@ def update_verkle_tree_nocommitmentupdate(root_node, key, value):
         new_inner_node = {"node_type": VERKLE_TRIE_NODE_TYPE_INNER}
         previous_node[index] = new_inner_node
         previous_node = new_inner_node
-        
+
         while old_stem[depth] == stem[depth]:
             index = stem[depth]
             new_inner_node = {"node_type": VERKLE_TRIE_NODE_TYPE_INNER}
@@ -140,7 +143,8 @@ def update_verkle_tree_nocommitmentupdate(root_node, key, value):
             previous_node = new_inner_node
             depth += 1
 
-        new_inner_node[stem[depth]] = {"node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE, "stem": stem, suffix: value}
+        new_inner_node[stem[depth]] = {
+            "node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE, "stem": stem, suffix: value}
         new_inner_node[old_stem[depth]] = old_suffix_tree
 
 
@@ -162,26 +166,32 @@ def update_verkle_tree(root_node, key, value):
                 old_node = current_node[index]
                 if current_node[index]["stem"] == stem:
                     current_node = current_node[index]
-                    old_value_lower = (int.from_bytes(current_node[suffix][:16], "little") + 2**128) if suffix in current_node else 0
-                    old_value_upper = (int.from_bytes(current_node[suffix][16:], "little")) if suffix in current_node else 0
+                    old_value_lower = (int.from_bytes(
+                        current_node[suffix][:16], "little") + 2**128) if suffix in current_node else 0
+                    old_value_upper = (int.from_bytes(
+                        current_node[suffix][16:], "little")) if suffix in current_node else 0
                     current_node[suffix] = value
-                    new_value_lower = int.from_bytes(value[:16], "little") + 2**128
+                    new_value_lower = int.from_bytes(
+                        value[:16], "little") + 2**128
                     new_value_upper = int.from_bytes(value[16:], "little")
                     commitment_change = BASIS["G"][2 * suffix % 256].dup().mul((MODULUS + new_value_lower - old_value_lower) % MODULUS) \
-                                        .add(BASIS["G"][(2 * suffix + 1) % 256].dup().mul((MODULUS + new_value_upper - old_value_upper) % MODULUS))
-                    
+                        .add(BASIS["G"][(2 * suffix + 1) % 256].dup().mul((MODULUS + new_value_upper - old_value_upper) % MODULUS))
+
                     if suffix < 128:
                         current_node["C1"].add(commitment_change)
                         new_field = commitment_to_field(current_node["C1"])
-                        current_node["commitment"].add(BASIS["G"][2].dup().mul((MODULUS + new_field - current_node["C1_field"]) % MODULUS))
+                        current_node["commitment"].add(BASIS["G"][2].dup().mul(
+                            (MODULUS + new_field - current_node["C1_field"]) % MODULUS))
                         current_node["C1_field"] = new_field
                     else:
                         current_node["C2"].add(commitment_change)
                         new_field = commitment_to_field(current_node["C2"])
-                        current_node["commitment"].add(BASIS["G"][3].dup().mul((MODULUS + new_field - current_node["C2_field"]) % MODULUS))
+                        current_node["commitment"].add(BASIS["G"][3].dup().mul(
+                            (MODULUS + new_field - current_node["C2_field"]) % MODULUS))
                         current_node["C2_field"] = new_field
                     new_field = commitment_to_field(current_node["commitment"])
-                    value_change = (MODULUS + new_field - current_node["commitment_field"]) % MODULUS
+                    value_change = (MODULUS + new_field -
+                                    current_node["commitment_field"]) % MODULUS
                     current_node["commitment_field"] = new_field
                     break
                 else:
@@ -194,30 +204,35 @@ def update_verkle_tree(root_node, key, value):
                     current_node = new_inner_node
                     while old_index == new_index:
                         index = new_index
-                        next_inner_node = {"node_type": VERKLE_TRIE_NODE_TYPE_INNER}
+                        next_inner_node = {
+                            "node_type": VERKLE_TRIE_NODE_TYPE_INNER}
                         current_node[index] = next_inner_node
                         inserted_path.append((index, current_node))
                         new_index = stem[len(path) + len(inserted_path)]
-                        old_index = old_node["stem"][len(path) + len(inserted_path)]
+                        old_index = old_node["stem"][len(
+                            path) + len(inserted_path)]
                         current_node = next_inner_node
 
-                    current_node[new_index] = {"node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE, "stem": stem, suffix: value}
+                    current_node[new_index] = {
+                        "node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE, "stem": stem, suffix: value}
                     current_node[old_index] = old_node
 
                     verkle_add_missing_commitments(current_node)
                     for index, node in reversed(inserted_path):
                         verkle_add_missing_commitments(node)
 
-                    value_change = (MODULUS + new_inner_node["commitment_field"] - old_node["commitment_field"]) % MODULUS
+                    value_change = (
+                        MODULUS + new_inner_node["commitment_field"] - old_node["commitment_field"]) % MODULUS
                     break
 
             current_node = current_node[index]
         else:
-            current_node[index] = {"node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE, "stem": stem, suffix: value}
+            current_node[index] = {
+                "node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE, "stem": stem, suffix: value}
             verkle_add_missing_commitments(current_node[index])
             value_change = current_node[index]["commitment_field"]
             break
-    
+
     # Update all the ancestor commitments along `path`
     for index, node in reversed(path):
         node["commitment"].add(BASIS["G"][index].dup().mul(value_change))
@@ -234,14 +249,14 @@ def verkle_add_missing_commitments(node):
     if node["node_type"] == VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE:
 
         C1 = ipa_utils.pedersen_commit_sparse({2 * i + j: int.from_bytes(node[i][16 * j:16 * (j + 1)], "little") + (1 - j) * 2**128
-                                                for i in range(128)
-                                                for j in range(2)
-                                                if i in node})
+                                               for i in range(128)
+                                               for j in range(2)
+                                               if i in node})
 
         C2 = ipa_utils.pedersen_commit_sparse({2 * i + j: int.from_bytes(node[128 + i][16 * j:16 * (j + 1)], "little") + (1 - j) * 2**128
-                                                for i in range(128)
-                                                for j in range(2)
-                                                if 128 + i in node})
+                                               for i in range(128)
+                                               for j in range(2)
+                                               if 128 + i in node})
 
         C1_field = commitment_to_field(C1)
         C2_field = commitment_to_field(C2)
@@ -251,9 +266,9 @@ def verkle_add_missing_commitments(node):
         node["C2"] = C2
         node["C2_field"] = C2_field
 
-        commitment = ipa_utils.pedersen_commit_sparse({0: 1, 
+        commitment = ipa_utils.pedersen_commit_sparse({0: 1,
                                                        1: int.from_bytes(node["stem"], "little"),
-                                                       2: C1_field, 
+                                                       2: C1_field,
                                                        3: C2_field})
 
         node["commitment"] = commitment
@@ -268,7 +283,8 @@ def verkle_add_missing_commitments(node):
                 child[i] = node[i]["commitment_field"]
         commitment = ipa_utils.pedersen_commit_sparse(child)
         node["commitment"] = commitment
-        node["commitment_field"] = int.from_bytes(commitment.serialize(), "little") % MODULUS
+        node["commitment_field"] = int.from_bytes(
+            commitment.serialize(), "little") % MODULUS
 
 
 def check_valid_tree(node, prefix=b""):
@@ -285,7 +301,8 @@ def check_valid_tree(node, prefix=b""):
                 child[i] = node[i]["commitment_field"]
         commitment = ipa_utils.pedersen_commit_sparse(child)
         assert node["commitment"] == commitment
-        assert node["commitment_field"] == int.from_bytes(commitment.serialize(), "little") % MODULUS
+        assert node["commitment_field"] == int.from_bytes(
+            commitment.serialize(), "little") % MODULUS
 
         for i in range(WIDTH):
             if i in node:
@@ -294,14 +311,14 @@ def check_valid_tree(node, prefix=b""):
         assert node["node_type"] == VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE
         assert node["stem"][:len(prefix)] == prefix
         C1 = ipa_utils.pedersen_commit_sparse({2 * i + j: int.from_bytes(node[i][16 * j:16 * (j + 1)], "little") + (1 - j) * 2**128
-                                                for i in range(128)
-                                                for j in range(2)
-                                                if i in node})
+                                               for i in range(128)
+                                               for j in range(2)
+                                               if i in node})
 
         C2 = ipa_utils.pedersen_commit_sparse({2 * i + j: int.from_bytes(node[128 + i][16 * j:16 * (j + 1)], "little") + (1 - j) * 2**128
-                                                for i in range(128)
-                                                for j in range(2)
-                                                if 128 + i in node})
+                                               for i in range(128)
+                                               for j in range(2)
+                                               if 128 + i in node})
 
         C1_field = commitment_to_field(C1)
         C2_field = commitment_to_field(C2)
@@ -311,9 +328,9 @@ def check_valid_tree(node, prefix=b""):
         assert node["C2"] == C2
         assert node["C2_field"] == C2_field
 
-        commitment = ipa_utils.pedersen_commit_sparse({0: 1, 
+        commitment = ipa_utils.pedersen_commit_sparse({0: 1,
                                                        1: int.from_bytes(node["stem"], "little"),
-                                                       2: C1_field, 
+                                                       2: C1_field,
                                                        3: C2_field})
 
         assert node["commitment"] == commitment
@@ -322,7 +339,7 @@ def check_valid_tree(node, prefix=b""):
         for i in range(WIDTH):
             if i in node:
                 values[node["stem"] + bytes([i])] = node[i]
-    
+
     return values
 
 
@@ -343,7 +360,7 @@ def get_total_depth(node):
                 total_depth += nodes + depth
         return total_depth, num_nodes
     else:
-        num_chunks = len([i for i  in range(256) if i in node])
+        num_chunks = len([i for i in range(256) if i in node])
         return num_chunks * 2, num_chunks
 
 
@@ -377,11 +394,12 @@ def find_key_with_path(root_node, key):
         return node_path, current_node[suffix]
 
     return node_path, None
-    
+
 
 def get_proof_size(proof):
     depths, extension_present, commitments_sorted_by_path_serialized, other_stems, D_serialized, ipa_proof = proof
-    size = len(depths) # assume 8 bit integer to represent the depth (5 bit) and extension_present(2 bit)
+    # assume 8 bit integer to represent the depth (5 bit) and extension_present(2 bit)
+    size = len(depths)
     size += 32 * len(commitments_sorted_by_path_serialized)
     size += 32 * len(other_stems)
     size += 32 + (len(ipa_proof) - 1) * 2 * 32 + 32
@@ -399,7 +417,8 @@ def start_logging_time_if_eligible(string, eligible):
 
 def log_time_if_eligible(string, width, eligible):
     if eligible:
-        print(string + ' ' * max(1, width - len(string)) + "{0:7.3f} s".format(time() - lasttime[0]), file=sys.stderr)
+        print(string + ' ' * max(1, width - len(string)) +
+              "{0:7.3f} s".format(time() - lasttime[0]), file=sys.stderr)
         lasttime[0] = time()
 
 
@@ -410,44 +429,53 @@ def make_ipa_multiproof(Cs, fs, zs, ys, display_times=True):
 
     This proof makes the assumption that the domain is the integers 0, 1, 2, ... WIDTH - 1
     """
-
+    tr = Transcript(MODULUS, b"multiproof")
     # Step 1: Construct g(X) polynomial in evaluation form
-    r = ipa_utils.hash_to_field(Cs + zs + ys) % MODULUS
+    for C in Cs:
+        tr.append_point(C, b"C")
+    for z in zs:
+        tr.append_scalar(z, b"z")
+    for y in ys:
+        tr.append_scalar(y, b"y")
+
+    r = tr.challenge_scalar(b"r")
 
     log_time_if_eligible("   Hashed to r", 30, display_times)
 
     g = [0 for i in range(WIDTH)]
     power_of_r = 1
     for f, index in zip(fs, zs):
-        quotient = primefield.compute_inner_quotient_in_evaluation_form(f, index)
+        quotient = primefield.compute_inner_quotient_in_evaluation_form(
+            f, index)
         for i in range(WIDTH):
             g[i] += power_of_r * quotient[i]
 
         power_of_r = power_of_r * r % MODULUS
-    
+
     for i in range(len(g)):
         g[i] %= MODULUS
 
     log_time_if_eligible("   Computed g polynomial", 30, display_times)
 
     D = ipa_utils.pedersen_commit(g)
+    tr.append_point(D, b"D")
 
     log_time_if_eligible("   Computed commitment D", 30, display_times)
 
     # Step 2: Compute h in evaluation form
-    
-    t = ipa_utils.hash_to_field([r, D]) % MODULUS
-    
+
+    t = tr.challenge_scalar(b"t")
+
     h = [0 for i in range(WIDTH)]
     power_of_r = 1
-    
+
     for f, index in zip(fs, zs):
         denominator_inv = primefield.inv(t - primefield.DOMAIN[index])
         for i in range(WIDTH):
             h[i] += power_of_r * f[i] * denominator_inv % MODULUS
-            
+
         power_of_r = power_of_r * r % MODULUS
-   
+
     for i in range(len(h)):
         h[i] %= MODULUS
 
@@ -459,7 +487,8 @@ def make_ipa_multiproof(Cs, fs, zs, ys, display_times=True):
 
     E = ipa_utils.pedersen_commit(h)
 
-    y, ipa_proof = ipa_utils.evaluate_and_compute_ipa_proof(E.dup().add(D.dup().mul(MODULUS-1)), h_minus_g, t)
+    y, ipa_proof = ipa_utils.evaluate_and_compute_ipa_proof(tr,
+                                                            E.dup().add(D.dup().mul(MODULUS-1)), h_minus_g, t)
 
     log_time_if_eligible("   Computed IPA proof", 30, display_times)
 
@@ -475,14 +504,24 @@ def check_ipa_multiproof(Cs, zs, ys, proof, display_times=True):
     D_serialized, ipa_proof = proof
 
     D = Point().deserialize(D_serialized)
+    tr = Transcript(MODULUS, b"multiproof")
+
+    for C in Cs:
+        tr.append_point(C, b"C")
+    for z in zs:
+        tr.append_scalar(z, b"z")
+    for y in ys:
+        tr.append_scalar(y, b"y")
 
     # Step 1
-    r = ipa_utils.hash_to_field(Cs + zs + ys)
+    r = tr.challenge_scalar(b"r")
 
     log_time_if_eligible("   Computed r hash", 30, display_times)
-    
+
     # Step 2
-    t = ipa_utils.hash_to_field([r, D])
+    tr.append_point(D, b"D")
+    t = tr.challenge_scalar(b"t")
+
     E_coefficients = {}
     g_2_of_t = 0
     power_of_r = 1
@@ -494,21 +533,22 @@ def check_ipa_multiproof(Cs, zs, ys, proof, display_times=True):
         C_serialized = C.serialize()
         C_by_serialized[C_serialized] = C
         E_coefficients[C_serialized] = E_coefficient if C_serialized not in E_coefficients \
-                                        else (E_coefficients[C_serialized] + E_coefficient) % MODULUS
+            else (E_coefficients[C_serialized] + E_coefficient) % MODULUS
         g_2_of_t += E_coefficient * y % MODULUS
 
         power_of_r = power_of_r * r % MODULUS
 
     log_time_if_eligible("   Computed g2 and e coeffs", 30, display_times)
-    
-    E = Point().msm([C_by_serialized[x] for x in E_coefficients.keys()], E_coefficients.values())
+
+    E = Point().msm([C_by_serialized[x]
+                     for x in E_coefficients.keys()], E_coefficients.values())
 
     log_time_if_eligible("   Computed E commitment", 30, display_times)
 
     # Step 3 (Check IPA proofs)
     y = g_2_of_t % primefield.MODULUS
 
-    if not ipa_utils.check_ipa_proof(E.dup().add(D.dup().mul(MODULUS - 1)), t, y, ipa_proof):
+    if not ipa_utils.check_ipa_proof(tr, E.dup().add(D.dup().mul(MODULUS - 1)), t, y, ipa_proof):
         return False
 
     log_time_if_eligible("   Checked IPA proof", 30, display_times)
@@ -523,13 +563,14 @@ def make_verkle_proof(root_node, keys, display_times=True):
     This includes proving that a value is not in the verkle trie
     """
 
-    start_logging_time_if_eligible("   Starting proof computation", display_times)
+    start_logging_time_if_eligible(
+        "   Starting proof computation", display_times)
 
     #
     # Revealing a full verkle proof requires the following proofs for each `key`
     #
     # - all nodes on the path to the extension node, with z determined by stem             [VERKLE_PROOF_COMMITMENT_TYPE_INNER]
-    # 
+    #
     # If there is an extension at the last place, then further it requires an extension proof:
     #
     # - the extension node, z = 0 (value = 1)                                              [VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION]
@@ -578,30 +619,39 @@ def make_verkle_proof(root_node, keys, display_times=True):
 
         for path, z, node in node_path:
             if node["node_type"] == VERKLE_TRIE_NODE_TYPE_INNER:
-                nodes_by_path[path] = (VERKLE_PROOF_COMMITMENT_TYPE_INNER, node)
-                nodes_by_path_and_z[(path, z)] = (VERKLE_PROOF_COMMITMENT_TYPE_INNER, node)
+                nodes_by_path[path] = (
+                    VERKLE_PROOF_COMMITMENT_TYPE_INNER, node)
+                nodes_by_path_and_z[(path, z)] = (
+                    VERKLE_PROOF_COMMITMENT_TYPE_INNER, node)
 
         node = node_path[-1][2]
         path = node_path[-1][0]
         if node["node_type"] == VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE:
-            
+
             other_stem = node["stem"]
             depths_by_stem[stem] = len(node_path) - 1
-            nodes_by_path[path] = (VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION, node)
-            nodes_by_path_and_z[(path, 0)] = (VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION, node) # 1
-            nodes_by_path_and_z[(path, 1)] = (VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION, node) # stem
+            nodes_by_path[path] = (
+                VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION, node)
+            nodes_by_path_and_z[(path, 0)] = (
+                VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION, node)  # 1
+            nodes_by_path_and_z[(path, 1)] = (
+                VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION, node)  # stem
 
             if other_stem == stem:
                 extension_present_by_stem[stem] = VERKLE_PROOF_EXTENSION_PRESENT_PRESENT
 
-                nodes_by_path_and_z[(path, 2 + suffix // 128)] = (VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION, node)  # C1/C2
+                nodes_by_path_and_z[(
+                    path, 2 + suffix // 128)] = (VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION, node)  # C1/C2
 
                 suffix_tree_path = path + bytes([2 if suffix < 128 else 3])
                 suffix_tree_commitment = VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C1 if suffix < 128 \
-                                        else VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C2
-                nodes_by_path[suffix_tree_path] = (suffix_tree_commitment, node)
-                nodes_by_path_and_z[(suffix_tree_path, suffix * 2 % 256)] = (suffix_tree_commitment, node)       # value_lower
-                nodes_by_path_and_z[(suffix_tree_path, (suffix * 2 + 1) % 256)] = (suffix_tree_commitment, node) # value_upper
+                    else VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C2
+                nodes_by_path[suffix_tree_path] = (
+                    suffix_tree_commitment, node)
+                nodes_by_path_and_z[(suffix_tree_path, suffix * 2 % 256)
+                                    ] = (suffix_tree_commitment, node)       # value_lower
+                nodes_by_path_and_z[(suffix_tree_path, (suffix * 2 + 1) %
+                                     256)] = (suffix_tree_commitment, node)  # value_upper
             else:
                 extension_present_by_stem[stem] = VERKLE_PROOF_EXTENSION_PRESENT_OTHERSTEM
                 other_stems.add(other_stem)
@@ -610,15 +660,16 @@ def make_verkle_proof(root_node, keys, display_times=True):
             extension_present_by_stem[stem] = VERKLE_PROOF_EXTENSION_PRESENT_NOEXTENSION
 
     depths = list(map(lambda x: x[1], sorted(depths_by_stem.items())))
-    extension_present = list(map(lambda x: x[1], sorted(extension_present_by_stem.items())))
-        
+    extension_present = list(
+        map(lambda x: x[1], sorted(extension_present_by_stem.items())))
+
     log_time_if_eligible("   Computed key paths", 30, display_times)
-    
-    # Nodes sorted 
+
+    # Nodes sorted
     nodes_sorted_by_path_and_z = sorted(nodes_by_path_and_z.items())
-    
+
     log_time_if_eligible("   Sorted all commitments", 30, display_times)
-    
+
     zs = []
     ys = []
     fs = []
@@ -631,7 +682,8 @@ def make_verkle_proof(root_node, keys, display_times=True):
         if node_type == VERKLE_PROOF_COMMITMENT_TYPE_INNER:
             Cs.append(node["commitment"])
             ys.append(node[z]["commitment_field"] if z in node else 0)
-            fs.append([node[i]["commitment_field"] if i in node else 0 for i in range(WIDTH)])
+            fs.append([node[i]["commitment_field"]
+                      if i in node else 0 for i in range(WIDTH)])
         elif node_type == VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION:
             Cs.append(node["commitment"])
             if z == 0:
@@ -642,11 +694,11 @@ def make_verkle_proof(root_node, keys, display_times=True):
                 ys.append(node["C1_field"])
             elif z == 3:
                 ys.append(node["C2_field"])
-            fs.append([1, 
+            fs.append([1,
                        int.from_bytes(node["stem"], "little"),
                        node["C1_field"],
                        node["C2_field"]]
-                        + [0] * 252)
+                      + [0] * 252)
         elif node_type in [VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C1, VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C2]:
             if node_type == VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C1:
                 Cs.append(node["C1"])
@@ -659,14 +711,16 @@ def make_verkle_proof(root_node, keys, display_times=True):
                 ys.append(0)
             else:
                 if z % 2 == 0:
-                    ys.append(int.from_bytes(node[suffix][:16], "little") + 2**128)
+                    ys.append(int.from_bytes(
+                        node[suffix][:16], "little") + 2**128)
                 else:
                     ys.append(int.from_bytes(node[suffix][16:], "little"))
             fs.append([(int.from_bytes(node[suffix_offset + i][16 * j:16 * (j + 1)], "little") + (1 - j) * 2**128) if suffix_offset + i in node else 0
-                                                for i in range(128)
-                                                for j in range(2)])
+                       for i in range(128)
+                       for j in range(2)])
 
-    D_serialized, ipa_proof = make_ipa_multiproof(Cs, fs, zs, ys, display_times)
+    D_serialized, ipa_proof = make_ipa_multiproof(
+        Cs, fs, zs, ys, display_times)
 
     # All commitments, but without any duplications. These are for sending over the wire as part of the proof
     nodes_sorted_by_path = sorted(nodes_by_path.items())
@@ -674,14 +728,19 @@ def make_verkle_proof(root_node, keys, display_times=True):
     for path, node_type_and_node in nodes_sorted_by_path[1:]:
         node_type, node = node_type_and_node
         if node_type in [VERKLE_PROOF_COMMITMENT_TYPE_INNER, VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION]:
-            commitments_sorted_by_path_serialized.append(node["commitment"].serialize())
+            commitments_sorted_by_path_serialized.append(
+                node["commitment"].serialize())
         elif node_type == VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C1:
-            commitments_sorted_by_path_serialized.append(node["C1"].serialize())
+            commitments_sorted_by_path_serialized.append(
+                node["C1"].serialize())
         elif node_type == VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C2:
-            commitments_sorted_by_path_serialized.append(node["C2"].serialize())
+            commitments_sorted_by_path_serialized.append(
+                node["C2"].serialize())
 
-    stems_with_extension = set(stem for stem in extension_present_by_stem if extension_present_by_stem[stem])
-    other_stems = sorted(list(stem for stem in other_stems if stem not in stems_with_extension))
+    stems_with_extension = set(
+        stem for stem in extension_present_by_stem if extension_present_by_stem[stem])
+    other_stems = sorted(
+        list(stem for stem in other_stems if stem not in stems_with_extension))
 
     log_time_if_eligible("   Serialized commitments", 30, display_times)
 
@@ -698,7 +757,8 @@ def check_verkle_proof(verkle_root, keys, values, proof, display_times=True):
 
     # Unpack the proof
     depths, extension_present, commitments_sorted_by_path_serialized, other_stems, D_serialized, ipa_proof = proof
-    commitments_sorted_by_path = [Point().deserialize(verkle_root)] + [Point().deserialize(x) for x in commitments_sorted_by_path_serialized]
+    commitments_sorted_by_path = [Point().deserialize(
+        verkle_root)] + [Point().deserialize(x) for x in commitments_sorted_by_path_serialized]
 
     # Find all stems
     stems = sorted(list(set([get_stem(key) for key in keys])))
@@ -721,19 +781,21 @@ def check_verkle_proof(verkle_root, keys, values, proof, display_times=True):
         extension_present_by_stem[stem] = extpres
         if extpres == VERKLE_PROOF_EXTENSION_PRESENT_PRESENT:
             stems_with_extension.add(stem)
-    
+
     # Find all required indices
     for key, value in zip(keys, values):
         stem = get_stem(key)
         depth = depths_by_stem[stem]
         extpres = extension_present_by_stem[stem]
         for i in range(depth):
-            commitment_types_by_path[stem[:i]] = VERKLE_PROOF_COMMITMENT_TYPE_INNER
+            commitment_types_by_path[stem[:i]
+                                     ] = VERKLE_PROOF_COMMITMENT_TYPE_INNER
             all_paths_and_zs.add((stem[:i], stem[i]))
 
         if extpres in [VERKLE_PROOF_EXTENSION_PRESENT_OTHERSTEM, VERKLE_PROOF_EXTENSION_PRESENT_PRESENT]:
 
-            commitment_types_by_path[stem[:depth]] = VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION
+            commitment_types_by_path[stem[:depth]
+                                     ] = VERKLE_PROOF_COMMITMENT_TYPE_EXTENSION
             all_paths_and_zs.add((stem[:depth], 0))
             all_paths_and_zs.add((stem[:depth], 1))
 
@@ -744,26 +806,33 @@ def check_verkle_proof(verkle_root, keys, values, proof, display_times=True):
 
                 all_paths_and_zs.add((stem[:depth], 2 + (suffix // 128)))
 
-                leaf_values_by_path_and_z[(stem[:depth], 1)] = int.from_bytes(stem, "little")
+                leaf_values_by_path_and_z[(stem[:depth], 1)] = int.from_bytes(
+                    stem, "little")
 
-                suffix_tree_path = stem[:depth] + bytes([2 if suffix < 128 else 3])
+                suffix_tree_path = stem[:depth] + \
+                    bytes([2 if suffix < 128 else 3])
                 commitment_types_by_path[suffix_tree_path] = VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C1 if suffix < 128 \
-                                                                else VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C2
+                    else VERKLE_PROOF_COMMITMENT_TYPE_SUFFIX_TREE_C2
                 all_paths_and_zs.add((suffix_tree_path, 2 * suffix % 256))
-                all_paths_and_zs.add((suffix_tree_path, (2 * suffix + 1) % 256))
+                all_paths_and_zs.add(
+                    (suffix_tree_path, (2 * suffix + 1) % 256))
 
-                value_lower = int.from_bytes(value[:16], "little") + 2**128 if value != None else 0
-                value_upper = int.from_bytes(value[16:], "little") if value != None else 0
+                value_lower = int.from_bytes(
+                    value[:16], "little") + 2**128 if value != None else 0
+                value_upper = int.from_bytes(
+                    value[16:], "little") if value != None else 0
 
-                leaf_values_by_path_and_z[(suffix_tree_path, 2 * suffix % 256)] = value_lower
-                leaf_values_by_path_and_z[(suffix_tree_path, (2 * suffix + 1) % 256)] = value_upper
+                leaf_values_by_path_and_z[(
+                    suffix_tree_path, 2 * suffix % 256)] = value_lower
+                leaf_values_by_path_and_z[(
+                    suffix_tree_path, (2 * suffix + 1) % 256)] = value_upper
             elif extpres == VERKLE_PROOF_EXTENSION_PRESENT_OTHERSTEM:
                 # The proof indicates that an extension node for a different stem was found in the tree
                 # We need to verify this is the case by looking up the other stem in "other_stems"
                 # and verifying that the extension node at the site is indeed for the other stem
 
                 # First check if the extension node is already included in the proof because the other stem
-                # is already part of this proof. In this special case, we don't have to do anything because the 
+                # is already part of this proof. In this special case, we don't have to do anything because the
                 # extension proof for the other stem will already do all the work.
                 other_stem = None
 
@@ -777,7 +846,7 @@ def check_verkle_proof(verkle_root, keys, values, proof, display_times=True):
                     if o[:depth] == stem[:depth]:
                         assert other_stem is None
                         other_stem = o
-                
+
                 if other_stem is None:
                     # TODO: `other_stem` search is linear search which should work perfectly in average case but
                     # is a DOS vector. Need to employ binary search
@@ -791,7 +860,8 @@ def check_verkle_proof(verkle_root, keys, values, proof, display_times=True):
 
                     # Now we need to add this extension node to the proof to show that our original stem wasn't
                     # present
-                    leaf_values_by_path_and_z[(other_stem[:depth], 1)] = int.from_bytes(other_stem, "little")
+                    leaf_values_by_path_and_z[(other_stem[:depth], 1)] = int.from_bytes(
+                        other_stem, "little")
 
                 other_stems_by_prefix[stem[:depth]] = other_stem
 
@@ -816,19 +886,21 @@ def check_verkle_proof(verkle_root, keys, values, proof, display_times=True):
     log_time_if_eligible("   Computed indices", 30, display_times)
 
     # Step 0: recreate the commitment list sorted by indices
-    commitments_by_path = {path: commitment for path, commitment in zip(all_paths, commitments_sorted_by_path)}
-    commitments_by_path_and_z = {(path, z): commitments_by_path[path] for path, z in all_paths_and_zs}
-    
+    commitments_by_path = {path: commitment for path, commitment in zip(
+        all_paths, commitments_sorted_by_path)}
+    commitments_by_path_and_z = {
+        (path, z): commitments_by_path[path] for path, z in all_paths_and_zs}
+
     ys_by_path_and_z = {}
     for path, z in all_paths_and_zs:
         child_path = path + bytes([z])
         ys_by_path_and_z[(path, z)] = leaf_values_by_path_and_z[(path, z)] if (path, z) in leaf_values_by_path_and_z \
-                                      else int.from_bytes(commitments_by_path[child_path].serialize(), "little") % MODULUS
+            else int.from_bytes(commitments_by_path[child_path].serialize(), "little") % MODULUS
 
     Cs = list(map(lambda x: x[1], sorted(commitments_by_path_and_z.items())))
-    
+
     zs = list(map(lambda x: x[1], sorted(all_paths_and_zs)))
-    
+
     ys = list(map(lambda x: x[1], sorted(ys_by_path_and_z.items())))
 
     log_time_if_eligible("   Recreated commitment lists", 30, display_times)
@@ -878,56 +950,60 @@ def compute_updated_verkle_root(verkle_root, keys, values, updated_values, updat
             if any(i in update for i in range(128)):
                 c1_update_vals = {2 * i + j: (MODULUS + int.from_bytes(update[i][1][16 * j: 16 * (j + 1)], "little") + (1 - j) * 2**128
                                               - (int.from_bytes(update[i][0][16 * j: 16 * (j + 1)], "little") + (1 - j) * 2**128 if update[i][0] is not None else 0)) % MODULUS
-                                    for i in range(128)
-                                    for j in range(2)
-                                    if i in update}
+                                  for i in range(128)
+                                  for j in range(2)
+                                  if i in update}
                 c1_update = ipa_utils.pedersen_commit_sparse(c1_update_vals)
                 c1_path = extension_path + bytes([2])
                 old_commitment = commitments_by_path[c1_path]
                 new_commitment = old_commitment.dup().add(c1_update)
-                c1_field_update = (MODULUS + commitment_to_field(new_commitment) - commitment_to_field(old_commitment)) % MODULUS
+                c1_field_update = (MODULUS + commitment_to_field(new_commitment) -
+                                   commitment_to_field(old_commitment)) % MODULUS
 
             c2_field_update = 0
             if any(i in update for i in range(128, 256)):
                 c2_update_vals = {2 * i + j: (MODULUS + int.from_bytes(update[128 + i][1][16 * j: 16 * (j + 1)], "little") + (1 - j) * 2**128
                                               - (int.from_bytes(update[128 + i][0][16 * j: 16 * (j + 1)], "little") + (1 - j) * 2**128 if update[128 + i][0] is not None else 0)) % MODULUS
-                                    for i in range(128)
-                                    for j in range(2)
-                                    if 128 + i in update}
+                                  for i in range(128)
+                                  for j in range(2)
+                                  if 128 + i in update}
                 c2_update = ipa_utils.pedersen_commit_sparse(c2_update_vals)
                 c2_path = extension_path + bytes([3])
                 old_commitment = commitments_by_path[c2_path]
                 new_commitment = old_commitment.dup().add(c2_update)
-                c2_field_update = (MODULUS + commitment_to_field(new_commitment) - commitment_to_field(old_commitment)) % MODULUS
+                c2_field_update = (MODULUS + commitment_to_field(new_commitment) -
+                                   commitment_to_field(old_commitment)) % MODULUS
 
-            commitment_update = ipa_utils.pedersen_commit_sparse({2: c1_field_update, 3: c2_field_update})
+            commitment_update = ipa_utils.pedersen_commit_sparse(
+                {2: c1_field_update, 3: c2_field_update})
             old_commitment = commitments_by_path[extension_path]
             new_commitment = old_commitment.dup().add(commitment_update)
             update["commitment"] = new_commitment
             update["commitment_field"] = commitment_to_field(new_commitment)
-        
+
         else:
             if extension_present_by_stem[stem] == VERKLE_PROOF_EXTENSION_PRESENT_OTHERSTEM:
-                updated_stems_by_prefix[prefix].add(other_stems_by_prefix[prefix])
+                updated_stems_by_prefix[prefix].add(
+                    other_stems_by_prefix[prefix])
 
             c1_vals = {2 * i + j: int.from_bytes(update[i][1][16 * j:16 * (j + 1)], "little") + (1 - j) * 2**128
-                                                    for i in range(128)
-                                                    for j in range(2)
-                                                    if i in update}
+                       for i in range(128)
+                       for j in range(2)
+                       if i in update}
             C1 = ipa_utils.pedersen_commit_sparse(c1_vals)
 
             c2_vals = {2 * i + j: int.from_bytes(update[128 + i][1][16 * j:16 * (j + 1)], "little") + (1 - j) * 2**128
-                                                    for i in range(128)
-                                                    for j in range(2)
-                                                    if 128 + i in update}
+                       for i in range(128)
+                       for j in range(2)
+                       if 128 + i in update}
             C2 = ipa_utils.pedersen_commit_sparse(c2_vals)
 
             C1_field = commitment_to_field(C1)
             C2_field = commitment_to_field(C2)
 
-            commitment = ipa_utils.pedersen_commit_sparse({0: 1, 
+            commitment = ipa_utils.pedersen_commit_sparse({0: 1,
                                                            1: int.from_bytes(stem, "little"),
-                                                           2: C1_field, 
+                                                           2: C1_field,
                                                            3: C2_field})
             update["commitment"] = commitment
             update["commitment_field"] = commitment_to_field(commitment)
@@ -955,7 +1031,7 @@ def compute_updated_verkle_root(verkle_root, keys, values, updated_values, updat
             old_field = commitment_to_field(old_commitment)
         else:
             old_field = 0
-        
+
         if len(stems) == 1:
             stem = list(stems)[0]
             new_field = updated_stems[stem]["commitment_field"]
@@ -971,13 +1047,15 @@ def compute_updated_verkle_root(verkle_root, keys, values, updated_values, updat
                 depth = start_depth
 
                 if stem in updated_stems:
-                    commitment, commitment_field = updated_stems[stem]["commitment"], updated_stems[stem]["commitment_field"]
+                    commitment, commitment_field = updated_stems[stem][
+                        "commitment"], updated_stems[stem]["commitment_field"]
                 else:
                     # This is the stem that was originally at this prefix path -- it wasn't updated but we do need
                     # to insert it into the tree
                     commitment = commitments_by_path[prefix]
                     commitment_field = commitment_to_field(commitment)
-                new_suffix_tree = {"node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE, "commitment": commitment, "commitment_field": commitment_field, "stem": stem}
+                new_suffix_tree = {"node_type": VERKLE_TRIE_NODE_TYPE_SUFFIX_TREE,
+                                   "commitment": commitment, "commitment_field": commitment_field, "stem": stem}
 
                 while current_node["node_type"] == VERKLE_TRIE_NODE_TYPE_INNER:
                     previous_node = current_node
@@ -997,10 +1075,11 @@ def compute_updated_verkle_root(verkle_root, keys, values, updated_values, updat
                     new_inner_node = {"node_type": VERKLE_TRIE_NODE_TYPE_INNER}
                     previous_node[index] = new_inner_node
                     previous_node = new_inner_node
-                    
+
                     while old_stem[depth] == stem[depth]:
                         index = stem[depth]
-                        new_inner_node = {"node_type": VERKLE_TRIE_NODE_TYPE_INNER}
+                        new_inner_node = {
+                            "node_type": VERKLE_TRIE_NODE_TYPE_INNER}
                         previous_node[index] = new_inner_node
                         previous_node = new_inner_node
                         depth += 1
@@ -1022,7 +1101,8 @@ def compute_updated_verkle_root(verkle_root, keys, values, updated_values, updat
         field_updates = {}
         for index, update_node in node.items():
             if isinstance(update_node, dict):
-                field_updates[index] = compute_update(path + bytes([index]), update_node)
+                field_updates[index] = compute_update(
+                    path + bytes([index]), update_node)
             else:
                 field_updates[index] = update_node
         commitment_update = ipa_utils.pedersen_commit_sparse(field_updates)
@@ -1030,11 +1110,12 @@ def compute_updated_verkle_root(verkle_root, keys, values, updated_values, updat
         new_commitment = old_commitment.dup().add(commitment_update)
         if path == b'':
             return new_commitment
-        field_update = (MODULUS + commitment_to_field(new_commitment) - commitment_to_field(old_commitment)) % MODULUS
+        field_update = (MODULUS + commitment_to_field(new_commitment) -
+                        commitment_to_field(old_commitment)) % MODULUS
         return field_update
 
     root_update = compute_update(b'', update_tree)
-    
+
     log_time_if_eligible("   Computed updated verkle root", 30, display_times)
 
     return root_update
@@ -1057,23 +1138,27 @@ if __name__ == "__main__":
             value = randint(0, 2**256-1).to_bytes(32, "little")
             update_verkle_tree_nocommitmentupdate(root_node, key, value)
             values[key] = value
-    
+
     average_depth = get_average_depth(root_node)
-        
-    print("Inserted {0} elements for an average depth of {1:.3f}".format(NUMBER_CHUNKS, average_depth), file=sys.stderr)
-    print("Average depth = {0:.3f} without counting suffix trees (stem tree only)".format(average_depth - 2), file=sys.stderr)
+
+    print("Inserted {0} elements for an average depth of {1:.3f}".format(
+        NUMBER_CHUNKS, average_depth), file=sys.stderr)
+    print("Average depth = {0:.3f} without counting suffix trees (stem tree only)".format(
+        average_depth - 2), file=sys.stderr)
 
     time_a = time()
     verkle_add_missing_commitments(root_node)
     time_b = time()
 
-    print("Computed verkle root in {0:.3f} s".format(time_b - time_a), file=sys.stderr)
+    print("Computed verkle root in {0:.3f} s".format(
+        time_b - time_a), file=sys.stderr)
 
     time_a = time()
     assert values == check_valid_tree(root_node)
     time_b = time()
-    
-    print("[Checked tree valid: {0:.3f} s]".format(time_b - time_a), file=sys.stderr)
+
+    print("[Checked tree valid: {0:.3f} s]".format(
+        time_b - time_a), file=sys.stderr)
 
     if NUMBER_ADDED_STEMS > 0:
         time_x = time()
@@ -1083,15 +1168,18 @@ if __name__ == "__main__":
             update_verkle_tree(root_node, key, value)
             values[key] = value
         time_y = time()
-            
-        print("Additionally inserted {0} stems in {1:.3f} s".format(NUMBER_ADDED_STEMS, time_y - time_x), file=sys.stderr)
-        print("Keys in tree now: {0}, average depth: {1:.3f}".format(get_total_depth(root_node)[1], get_average_depth(root_node)), file=sys.stderr)
+
+        print("Additionally inserted {0} stems in {1:.3f} s".format(
+            NUMBER_ADDED_STEMS, time_y - time_x), file=sys.stderr)
+        print("Keys in tree now: {0}, average depth: {1:.3f}".format(
+            get_total_depth(root_node)[1], get_average_depth(root_node)), file=sys.stderr)
 
         time_a = time()
         assert values == check_valid_tree(root_node)
         time_b = time()
-        
-        print("[Checked tree valid: {0:.3f} s]".format(time_b - time_a), file=sys.stderr)
+
+        print("[Checked tree valid: {0:.3f} s]".format(
+            time_b - time_a), file=sys.stderr)
 
     if NUMBER_ADDED_CHUNKS > 0:
 
@@ -1105,15 +1193,18 @@ if __name__ == "__main__":
             update_verkle_tree(root_node, key, value)
             values[key] = value
         time_y = time()
-            
-        print("Additionally inserted {0} chunks in {1:.3f} s".format(NUMBER_ADDED_CHUNKS, time_y - time_x), file=sys.stderr)
-        print("Keys in tree now: {0}, average depth: {1:.3f}".format(get_total_depth(root_node)[1], get_average_depth(root_node)), file=sys.stderr)
+
+        print("Additionally inserted {0} chunks in {1:.3f} s".format(
+            NUMBER_ADDED_CHUNKS, time_y - time_x), file=sys.stderr)
+        print("Keys in tree now: {0}, average depth: {1:.3f}".format(
+            get_total_depth(root_node)[1], get_average_depth(root_node)), file=sys.stderr)
 
         time_a = time()
         assert values == check_valid_tree(root_node)
         time_b = time()
-        
-        print("[Checked tree valid: {0:.3f} s]".format(time_b - time_a), file=sys.stderr)
+
+        print("[Checked tree valid: {0:.3f} s]".format(
+            time_b - time_a), file=sys.stderr)
 
     all_keys = list(values.keys())
     shuffle(all_keys)
@@ -1129,19 +1220,21 @@ if __name__ == "__main__":
     for i in range(NUMBER_RANDOM_CHUNKS_PROOF):
         stem = get_stem(choice(existing_keys))
         suffix = randint(0, 255)
-        key = stem + bytes([suffix])        
+        key = stem + bytes([suffix])
         keys_in_proof.append(key)
         values_in_proof.append(values[key] if key in values else None)
 
     time_a = time()
     proof = make_verkle_proof(root_node, keys_in_proof)
     time_b = time()
-    
+
     proof_size = get_proof_size(proof)
     proof_time = time_b - time_a
-    
-    print("Computed proof for {0} keys (size = {1} bytes) in {2:.3f} s".format(len(keys_in_proof), proof_size, time_b - time_a), file=sys.stderr)
-    print("Witness size per key: {0:.3f} bytes".format(proof_size / len(keys_in_proof)))
+
+    print("Computed proof for {0} keys (size = {1} bytes) in {2:.3f} s".format(
+        len(keys_in_proof), proof_size, time_b - time_a), file=sys.stderr)
+    print("Witness size per key: {0:.3f} bytes".format(
+        proof_size / len(keys_in_proof)))
 
     updated_values = [None] * len(values_in_proof)
     for i in range(NUMBER_VALUES_UPDATED):
@@ -1151,19 +1244,23 @@ if __name__ == "__main__":
         updated_values[j] = randint(0, 2**256-1).to_bytes(32, "little")
 
     time_a = time()
-    r, update_hint =  check_verkle_proof(root_node["commitment"].serialize(), keys_in_proof, values_in_proof, proof)
+    r, update_hint = check_verkle_proof(
+        root_node["commitment"].serialize(), keys_in_proof, values_in_proof, proof)
     assert r
     time_b = time()
     check_time = time_b - time_a
 
-    print("Checked proof in {0:.3f} s".format(time_b - time_a), file=sys.stderr)
+    print("Checked proof in {0:.3f} s".format(
+        time_b - time_a), file=sys.stderr)
 
     time_a = time()
-    updated_root = compute_updated_verkle_root(root_node["commitment"].serialize(), keys_in_proof, values_in_proof, updated_values, update_hint)
+    updated_root = compute_updated_verkle_root(root_node["commitment"].serialize(
+    ), keys_in_proof, values_in_proof, updated_values, update_hint)
     time_b = time()
     check_time = time_b - time_a
 
-    print("Computed root update in {0:.3f} s".format(time_b - time_a), file=sys.stderr)
+    print("Computed root update in {0:.3f} s".format(
+        time_b - time_a), file=sys.stderr)
 
     time_a = time()
     for key, updated_value in zip(keys_in_proof, updated_values):
@@ -1174,4 +1271,5 @@ if __name__ == "__main__":
 
     assert root_node["commitment"] == updated_root
 
-    print("Verified updated root in {0:.3f} s".format(time_b - time_a), file=sys.stderr)
+    print("Verified updated root in {0:.3f} s".format(
+        time_b - time_a), file=sys.stderr)
