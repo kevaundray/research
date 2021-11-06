@@ -1,11 +1,12 @@
 from bandersnatch import Point, Scalar
-import hashlib
 from random import randint, shuffle, choice
 from poly_utils import PrimeField
 from time import time
-from ipa_utils import IPAUtils, hash
+from ipa_utils import IPAUtils
 import sys
 from transcript import Transcript
+from crs import get_crs
+
 #
 # Proof of concept implementation for verkle tries
 #
@@ -67,11 +68,14 @@ def generate_basis(size):
     """
     Generates a basis for Pedersen commitments
     """
-    # TODO: Currently random points that differ on every run.
-    # Implement reproducable basis generation once hash_to_curve is provided
-    BASIS_G = [Point(generator=False) for i in range(WIDTH)]
-    BASIS_Q = Point(generator=False)
+
+    BASIS_G = get_crs()
+    BASIS_Q = Point(generator=True)
     return {"G": BASIS_G, "Q": BASIS_Q}
+
+
+BASIS = generate_basis(WIDTH)
+ipa_utils = IPAUtils(BASIS["G"], BASIS["Q"], primefield)
 
 
 def get_stem(key):
@@ -486,6 +490,7 @@ def make_ipa_multiproof(Cs, fs, zs, ys, display_times=True):
     # Step 3: Evaluate and compute IPA proofs
 
     E = ipa_utils.pedersen_commit(h)
+    tr.append_point(E, b"E")
 
     y, ipa_proof = ipa_utils.evaluate_and_compute_ipa_proof(tr,
                                                             E.dup().add(D.dup().mul(MODULUS-1)), h_minus_g, t)
@@ -542,6 +547,7 @@ def check_ipa_multiproof(Cs, zs, ys, proof, display_times=True):
 
     E = Point().msm([C_by_serialized[x]
                      for x in E_coefficients.keys()], E_coefficients.values())
+    tr.append_point(E, b"E")
 
     log_time_if_eligible("   Computed E commitment", 30, display_times)
 
