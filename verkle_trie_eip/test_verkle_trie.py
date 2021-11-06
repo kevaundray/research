@@ -1,7 +1,5 @@
 import unittest
 from verkle_trie import VERKLE_TRIE_NODE_TYPE_INNER, verkle_add_missing_commitments, update_verkle_tree_nocommitmentupdate, update_verkle_tree
-from poly_utils import PrimeField
-from ipa_utils import IPAUtils
 
 
 class TestVerkle(unittest.TestCase):
