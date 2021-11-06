@@ -99,8 +99,8 @@ class IPAUtils():
 
         b = self.primefield.barycentric_formula_constants(z)
         tr.append_point(C, b"C")
-        tr.append_scalar(z, b"z")
-        tr.append_scalar(y, b"y")
+        tr.append_scalar(z, b"input point")
+        tr.append_scalar(y, b"output point")
         w = tr.challenge_scalar(b"w")
 
         q = self.BASIS_Q.dup().glv(w)
@@ -165,8 +165,8 @@ class IPAUtils():
         proof = []
 
         tr.append_point(C, b"C")
-        tr.append_scalar(z, b"z")
-        tr.append_scalar(y, b"y")
+        tr.append_scalar(z, b"input point")
+        tr.append_scalar(y, b"output point")
         w = tr.challenge_scalar(b"w")
 
         q = self.BASIS_Q.dup().glv(w)
