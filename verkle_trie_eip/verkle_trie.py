@@ -68,7 +68,7 @@ def generate_basis(size):
     """
     Generates a basis for Pedersen commitments
     """
-
+    # TODO expose the functionality needed to produce these points on the python side
     BASIS_G = get_crs()
     BASIS_Q = Point(generator=True)
     return {"G": BASIS_G, "Q": BASIS_Q}
@@ -426,21 +426,23 @@ def log_time_if_eligible(string, width, eligible):
         lasttime[0] = time()
 
 
-def make_ipa_multiproof(Cs, fs, zs, ys, display_times=True):
+def make_ipa_multiproof(tr, Cs, fs, zs, ys, display_times=True):
     """
     Computes an IPA multiproof according to the schema described here:
     https://dankradfeist.de/ethereum/2021/06/18/pcs-multiproofs.html
 
     This proof makes the assumption that the domain is the integers 0, 1, 2, ... WIDTH - 1
     """
-    tr = Transcript(MODULUS, b"multiproof")
     # Step 1: Construct g(X) polynomial in evaluation form
-    for C in Cs:
-        tr.append_point(C, b"C")
-    for z in zs:
-        tr.append_scalar(z, b"z")
-    for y in ys:
-        tr.append_scalar(y, b"y")
+    tr.domain_sep(b"multiproof")
+
+    for i in range(len(Cs)):
+        C_i = Cs[i]
+        z_i = zs[i]
+        y_i = ys[i]
+        tr.append_point(C_i, b"C")
+        tr.append_scalar(z_i, b"z")
+        tr.append_scalar(y_i, b"y")
 
     r = tr.challenge_scalar(b"r")
 
@@ -500,23 +502,23 @@ def make_ipa_multiproof(Cs, fs, zs, ys, display_times=True):
     return D.serialize(), ipa_proof
 
 
-def check_ipa_multiproof(Cs, zs, ys, proof, display_times=True):
+def check_ipa_multiproof(tr, Cs, zs, ys, proof, display_times=True):
     """
     Verifies an IPA multiproof according to the schema described here:
     https://dankradfeist.de/ethereum/2021/06/18/pcs-multiproofs.html
     """
-
+    tr.domain_sep(b"multiproof")
     D_serialized, ipa_proof = proof
 
     D = Point().deserialize(D_serialized)
-    tr = Transcript(MODULUS, b"multiproof")
 
-    for C in Cs:
-        tr.append_point(C, b"C")
-    for z in zs:
-        tr.append_scalar(z, b"z")
-    for y in ys:
-        tr.append_scalar(y, b"y")
+    for i in range(len(Cs)):
+        C_i = Cs[i]
+        z_i = zs[i]
+        y_i = ys[i]
+        tr.append_point(C_i, b"C")
+        tr.append_scalar(z_i, b"z")
+        tr.append_scalar(y_i, b"y")
 
     # Step 1
     r = tr.challenge_scalar(b"r")
@@ -562,7 +564,7 @@ def check_ipa_multiproof(Cs, zs, ys, proof, display_times=True):
     return True
 
 
-def make_verkle_proof(root_node, keys, display_times=True):
+def make_verkle_proof(tr, root_node, keys, display_times=True):
     """
     Creates a proof for the `keys` in the verkle trie given by `root_node`
 
@@ -725,8 +727,8 @@ def make_verkle_proof(root_node, keys, display_times=True):
                        for i in range(128)
                        for j in range(2)])
 
-    D_serialized, ipa_proof = make_ipa_multiproof(
-        Cs, fs, zs, ys, display_times)
+    D_serialized, ipa_proof = make_ipa_multiproof(tr,
+                                                  Cs, fs, zs, ys, display_times)
 
     # All commitments, but without any duplications. These are for sending over the wire as part of the proof
     nodes_sorted_by_path = sorted(nodes_by_path.items())
@@ -753,7 +755,7 @@ def make_verkle_proof(root_node, keys, display_times=True):
     return depths, extension_present, commitments_sorted_by_path_serialized, other_stems, D_serialized, ipa_proof
 
 
-def check_verkle_proof(verkle_root, keys, values, proof, display_times=True):
+def check_verkle_proof(tr, verkle_root, keys, values, proof, display_times=True):
     """
     Checks verkle trie proof according to
     https://dankradfeist.de/ethereum/2021/06/18/pcs-multiproofs.html
@@ -913,7 +915,7 @@ def check_verkle_proof(verkle_root, keys, values, proof, display_times=True):
 
     update_hint = depths_by_stem, extension_present_by_stem, commitments_by_path, other_stems_by_prefix
 
-    return check_ipa_multiproof(Cs, zs, ys, [D_serialized, ipa_proof], display_times), update_hint
+    return check_ipa_multiproof(tr, Cs, zs, ys, [D_serialized, ipa_proof], display_times), update_hint
 
 
 def compute_updated_verkle_root(verkle_root, keys, values, updated_values, update_hint, display_times=True):
@@ -1231,7 +1233,8 @@ if __name__ == "__main__":
         values_in_proof.append(values[key] if key in values else None)
 
     time_a = time()
-    proof = make_verkle_proof(root_node, keys_in_proof)
+    tr = Transcript(MODULUS, b"verkle trie")
+    proof = make_verkle_proof(tr, root_node, keys_in_proof)
     time_b = time()
 
     proof_size = get_proof_size(proof)
@@ -1250,8 +1253,9 @@ if __name__ == "__main__":
         updated_values[j] = randint(0, 2**256-1).to_bytes(32, "little")
 
     time_a = time()
-    r, update_hint = check_verkle_proof(
-        root_node["commitment"].serialize(), keys_in_proof, values_in_proof, proof)
+    tr = Transcript(MODULUS, b"verkle trie")
+    r, update_hint = check_verkle_proof(tr,
+                                        root_node["commitment"].serialize(), keys_in_proof, values_in_proof, proof)
     assert r
     time_b = time()
     check_time = time_b - time_a
