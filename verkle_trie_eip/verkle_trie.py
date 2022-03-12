@@ -1045,133 +1045,19 @@ if __name__ == "__main__":
     BASIS = generate_basis(WIDTH)
     ipa_utils = IPAUtils(BASIS["G"], BASIS["Q"], primefield)
 
-    # Build a random verkle trie
+    # Build an empty verkle trie
     root_node = {"node_type": VERKLE_TRIE_NODE_TYPE_INNER}
 
-    values = {}
+    # We want to make a proof of absence of this key
+    key_threes = bytes([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+                        3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])
 
-    for i in range(NUMBER_STEMS):
-        stem = randint(0, 2**248-1).to_bytes(31, "little")
-        for i in range(CHUNKS_PER_STEM):
-            key = stem + bytes([randint(0, 2**8-1)])
-            value = randint(0, 2**256-1).to_bytes(32, "little")
-            update_verkle_tree_nocommitmentupdate(root_node, key, value)
-            values[key] = value
-    
-    average_depth = get_average_depth(root_node)
-        
-    print("Inserted {0} elements for an average depth of {1:.3f}".format(NUMBER_CHUNKS, average_depth), file=sys.stderr)
-    print("Average depth = {0:.3f} without counting suffix trees (stem tree only)".format(average_depth - 2), file=sys.stderr)
-
-    time_a = time()
     verkle_add_missing_commitments(root_node)
-    time_b = time()
 
-    print("Computed verkle root in {0:.3f} s".format(time_b - time_a), file=sys.stderr)
+    keys_in_proof = [key_threes]
+    values_in_proof = [None]
 
-    time_a = time()
-    assert values == check_valid_tree(root_node)
-    time_b = time()
-    
-    print("[Checked tree valid: {0:.3f} s]".format(time_b - time_a), file=sys.stderr)
-
-    if NUMBER_ADDED_STEMS > 0:
-        time_x = time()
-        for i in range(NUMBER_ADDED_STEMS):
-            key = randint(0, 2**256-1).to_bytes(32, "little")
-            value = randint(0, 2**256-1).to_bytes(32, "little")
-            update_verkle_tree(root_node, key, value)
-            values[key] = value
-        time_y = time()
-            
-        print("Additionally inserted {0} stems in {1:.3f} s".format(NUMBER_ADDED_STEMS, time_y - time_x), file=sys.stderr)
-        print("Keys in tree now: {0}, average depth: {1:.3f}".format(get_total_depth(root_node)[1], get_average_depth(root_node)), file=sys.stderr)
-
-        time_a = time()
-        assert values == check_valid_tree(root_node)
-        time_b = time()
-        
-        print("[Checked tree valid: {0:.3f} s]".format(time_b - time_a), file=sys.stderr)
-
-    if NUMBER_ADDED_CHUNKS > 0:
-
-        time_x = time()
-        existing_keys = list(values.keys())
-        for i in range(NUMBER_ADDED_CHUNKS):
-            stem = get_stem(choice(existing_keys))
-            suffix = randint(0, 255)
-            key = stem + bytes([suffix])
-            value = randint(0, 2**256-1).to_bytes(32, "little")
-            update_verkle_tree(root_node, key, value)
-            values[key] = value
-        time_y = time()
-            
-        print("Additionally inserted {0} chunks in {1:.3f} s".format(NUMBER_ADDED_CHUNKS, time_y - time_x), file=sys.stderr)
-        print("Keys in tree now: {0}, average depth: {1:.3f}".format(get_total_depth(root_node)[1], get_average_depth(root_node)), file=sys.stderr)
-
-        time_a = time()
-        assert values == check_valid_tree(root_node)
-        time_b = time()
-        
-        print("[Checked tree valid: {0:.3f} s]".format(time_b - time_a), file=sys.stderr)
-
-    all_keys = list(values.keys())
-    shuffle(all_keys)
-
-    keys_in_proof = all_keys[:NUMBER_EXISTING_KEYS_PROOF]
-    values_in_proof = [values[key] for key in keys_in_proof]
-
-    for i in range(NUMBER_RANDOM_STEMS_PROOF):
-        key = randint(0, 2**256-1).to_bytes(32, "little")
-        keys_in_proof.append(key)
-        values_in_proof.append(values[key] if key in values else None)
-
-    for i in range(NUMBER_RANDOM_CHUNKS_PROOF):
-        stem = get_stem(choice(existing_keys))
-        suffix = randint(0, 255)
-        key = stem + bytes([suffix])        
-        keys_in_proof.append(key)
-        values_in_proof.append(values[key] if key in values else None)
-
-    time_a = time()
     proof = make_verkle_proof(root_node, keys_in_proof)
-    time_b = time()
-    
-    proof_size = get_proof_size(proof)
-    proof_time = time_b - time_a
-    
-    print("Computed proof for {0} keys (size = {1} bytes) in {2:.3f} s".format(len(keys_in_proof), proof_size, time_b - time_a), file=sys.stderr)
-    print("Witness size per key: {0:.3f} bytes".format(proof_size / len(keys_in_proof)))
 
-    updated_values = [None] * len(values_in_proof)
-    for i in range(NUMBER_VALUES_UPDATED):
-        j = randint(0, len(updated_values) - 1)
-        while updated_values[j] is not None:
-            j = randint(0, len(updated_values) - 1)
-        updated_values[j] = randint(0, 2**256-1).to_bytes(32, "little")
-
-    time_a = time()
-    r, update_hint =  check_verkle_proof(root_node["commitment"].serialize(), keys_in_proof, values_in_proof, proof)
-    assert r
-    time_b = time()
-    check_time = time_b - time_a
-
-    print("Checked proof in {0:.3f} s".format(time_b - time_a), file=sys.stderr)
-
-    time_a = time()
-    updated_root = compute_updated_verkle_root(root_node["commitment"].serialize(), keys_in_proof, values_in_proof, updated_values, update_hint)
-    time_b = time()
-    check_time = time_b - time_a
-
-    print("Computed root update in {0:.3f} s".format(time_b - time_a), file=sys.stderr)
-
-    time_a = time()
-    for key, updated_value in zip(keys_in_proof, updated_values):
-        if updated_value is not None:
-            update_verkle_tree(root_node, key, updated_value)
-    time_b = time()
-    check_time = time_b - time_a
-
-    assert root_node["commitment"] == updated_root
-
-    print("Verified updated root in {0:.3f} s".format(time_b - time_a), file=sys.stderr)
+    _, update_hint = check_verkle_proof(
+        root_node["commitment"].serialize(), keys_in_proof, values_in_proof, proof)
